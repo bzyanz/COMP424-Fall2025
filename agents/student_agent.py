@@ -4,219 +4,229 @@ from store import register_agent
 import numpy as np
 from copy import deepcopy
 import time
-from helpers import get_valid_moves, execute_move, check_endgame, count_disc_count_change
+from helpers import get_valid_moves, execute_move, check_endgame
 
 @register_agent("student_agent")
 class StudentAgent(Agent):
     """
-    OPTIMIZED Alpha-Beta - Focus on DEEP search with SIMPLE evaluation
-    Reaches depth 5-7 consistently
+    CORRECT α-β pruning implementation following COMP 424 pseudocode
     """
     
     def __init__(self):
         super(StudentAgent, self).__init__()
-        self.name = "DeepSimpleAB"
+        self.name = "CorrectAlphaBeta"
+        self.nodes_evaluated = 0
     
     def step(self, chess_board, player, opponent):
         """
-        REPLACES old step() - More aggressive time management for deeper search
+        Depth-limited α-β search
         """
         start_time = time.time()
-        TIME_LIMIT = 1.8  # Safe limit
+        self.nodes_evaluated = 0
         
-        # Get all moves
         moves = get_valid_moves(chess_board, player)
         if not moves:
             return None
         
-        # Quick initial ordering (corners first)
-        moves = self.ultra_fast_order(chess_board, moves, player)
-        best_move = moves[0]
+        # Order moves for better pruning
+        moves = self.order_moves(chess_board, moves, player)
         
-        # AGGRESSIVE iterative deepening - try to reach depth 7
-        depths_to_try = [1, 2, 3, 4, 5, 6, 7]
-        depth_reached = 0
-        
-        for depth in depths_to_try:
-            current_time = time.time() - start_time
-            
-            # Progressive time allocation - saves time for deeper searches
-            time_limits = {
-                1: 0.05,   # Depth 1: 0.05s max
-                2: 0.1,    # Depth 2: 0.1s max  
-                3: 0.2,    # Depth 3: 0.2s max
-                4: 0.4,    # Depth 4: 0.4s max
-                5: 0.8,    # Depth 5: 0.8s max
-                6: 1.3,    # Depth 6: 1.3s max
-                7: 1.7     # Depth 7: 1.7s max
-            }
-            
-            if current_time > time_limits.get(depth, 1.8):
-                continue  # Skip this depth if we're already over time budget
-            
-            try:
-                # Use FAST alpha-beta for this depth
-                move, score = self.fast_alpha_beta(
-                    chess_board, depth, player, opponent,
-                    -float('inf'), float('inf'), True,
-                    start_time, TIME_LIMIT
-                )
-                
-                if move is not None:
-                    best_move = move
-                    depth_reached = depth
-                    
-                    # If decisive score found, stop searching
-                    if abs(score) > 800:  # Big lead or deficit
-                        break
-                        
-            except TimeoutError:
-                break  # Ran out of time
-        
-        time_taken = time.time() - start_time
-        empty_squares = np.sum(chess_board == 0)
-        
-        print(f"DeepSimpleAB: depth={depth_reached}, empty={empty_squares}, time={time_taken:.3f}s")
-        
-        return best_move
-    
-    def fast_alpha_beta(self, board, depth, player, opponent, alpha, beta, 
-                       maximizing, start_time, time_limit):
-        """
-        REPLACES old alpha_beta() - Ultra-optimized for speed
-        Uses minimal evaluation to enable deeper search
-        """
-        # Fast time check (check less often for speed)
-        if depth <= 2 or depth % 2 == 0:  # Check every other level for deep searches
-            if time.time() - start_time > time_limit:
-                raise TimeoutError()
-        
-        # Get scores for terminal evaluation
-        is_endgame, p0_score, p1_score = check_endgame(board)
-        
-        # Terminal node or depth limit
-        if is_endgame or depth == 0:
-            # ULTRA SIMPLE evaluation - just piece difference
-            if player == 1:
-                score = p0_score - p1_score
-            else:
-                score = p1_score - p0_score
-            return None, score
-        
-        # Determine current player
-        current_player = player if maximizing else opponent
-        
-        # Get moves
-        moves = get_valid_moves(board, current_player)
-        if not moves:
-            # No moves - evaluate current position simply
-            if player == 1:
-                score = p0_score - p1_score
-            else:
-                score = p1_score - p0_score
-            return None, score
-        
-        # MINIMAL move ordering for speed
-        if maximizing:
-            # Sort by immediate gain, descending
-            moves.sort(key=lambda m: count_disc_count_change(board, m, player), reverse=True)
-        else:
-            # Sort by opponent's gain, ascending (worst for us first)
-            moves.sort(key=lambda m: count_disc_count_change(board, m, opponent))
-        
-        # Progressive widening: examine fewer moves at deeper levels
-        max_moves_to_examine = 50  # Default: all moves
-        if depth >= 5:
-            max_moves_to_examine = 15
-        elif depth >= 4:
-            max_moves_to_examine = 25
-        elif depth >= 3:
-            max_moves_to_examine = 35
-        
-        moves = moves[:max_moves_to_examine]
-        best_move = moves[0] if moves else None
-        
-        if maximizing:
-            best_score = -float('inf')
-            for move in moves:
-                # Apply move
-                new_board = deepcopy(board)
-                execute_move(new_board, move, current_player)
-                
-                # Recursive search
-                _, score = self.fast_alpha_beta(
-                    new_board, depth-1, player, opponent,
-                    alpha, beta, False,
-                    start_time, time_limit
-                )
-                
-                if score > best_score:
-                    best_score = score
-                    best_move = move
-                
-                alpha = max(alpha, best_score)
-                if beta <= alpha:
-                    break  # Beta cutoff
-            
-            return best_move, best_score
-            
-        else:  # minimizing player
-            best_score = float('inf')
-            for move in moves:
-                new_board = deepcopy(board)
-                execute_move(new_board, move, current_player)
-                
-                _, score = self.fast_alpha_beta(
-                    new_board, depth-1, player, opponent,
-                    alpha, beta, True,
-                    start_time, time_limit
-                )
-                
-                if score < best_score:
-                    best_score = score
-                    best_move = move
-                
-                beta = min(beta, best_score)
-                if beta <= alpha:
-                    break  # Alpha cutoff
-            
-            return best_move, best_score
-    
-    def ultra_fast_order(self, board, moves, player):
-        """
-        REPLACES old order_moves() - Minimal ordering for initial move selection
-        Only used for choosing which move to return if search fails
-        """
-        # Just two categories: corners and everything else
-        corners = []
-        non_corners = []
+        # α-β search with depth 3
+        depth = 3
+        best_move = None
+        best_value = -float('inf')
+        alpha = -float('inf')
+        beta = float('inf')
         
         for move in moves:
+            # Try this move
+            new_board = deepcopy(chess_board)
+            execute_move(new_board, move, player)
+            
+            # Min's turn (opponent)
+            value = self.min_value(new_board, depth-1, player, opponent, alpha, beta)
+            
+            if value > best_value:
+                best_value = value
+                best_move = move
+            
+            alpha = max(alpha, best_value)
+        
+        time_taken = time.time() - start_time
+        print(f"α-β: depth={depth}, nodes={self.nodes_evaluated}, time={time_taken:.3f}s, value={best_value}")
+        
+        return best_move if best_move else moves[0]
+    
+    def max_value(self, state, depth, player, opponent, alpha, beta):
+        """
+        Max player's turn (us)
+        Returns: utility value
+        """
+        self.nodes_evaluated += 1
+        
+        # Check terminal state
+        is_endgame, p0_score, p1_score = check_endgame(state)
+        if is_endgame:
+            return self.terminal_value(state, player, opponent, p0_score, p1_score)
+        
+        # Depth cutoff
+        if depth == 0:
+            return self.evaluation(state, player, opponent)
+        
+        moves = get_valid_moves(state, player)
+        if not moves:
+            # No moves available - opponent's turn
+            return self.min_value(state, depth-1, player, opponent, alpha, beta)
+        
+        # Order moves for better pruning
+        moves = self.order_moves(state, moves, player)
+        
+        value = -float('inf')
+        
+        for move in moves:
+            new_state = deepcopy(state)
+            execute_move(new_state, move, player)
+            
+            value = max(value, self.min_value(new_state, depth-1, player, opponent, alpha, beta))
+            
+            if value >= beta:
+                return value  # β cutoff
+            
+            alpha = max(alpha, value)
+        
+        return value
+    
+    def min_value(self, state, depth, player, opponent, alpha, beta):
+        """
+        Min player's turn (opponent)
+        Returns: utility value
+        """
+        self.nodes_evaluated += 1
+        
+        # Check terminal state
+        is_endgame, p0_score, p1_score = check_endgame(state)
+        if is_endgame:
+            return self.terminal_value(state, player, opponent, p0_score, p1_score)
+        
+        # Depth cutoff
+        if depth == 0:
+            return self.evaluation(state, player, opponent)
+        
+        moves = get_valid_moves(state, opponent)
+        if not moves:
+            # No moves available - our turn
+            return self.max_value(state, depth-1, player, opponent, alpha, beta)
+        
+        # Order moves for opponent (they want to minimize our score)
+        moves = self.order_moves_opponent(state, moves, opponent, player)
+        
+        value = float('inf')
+        
+        for move in moves:
+            new_state = deepcopy(state)
+            execute_move(new_state, move, opponent)
+            
+            value = min(value, self.max_value(new_state, depth-1, player, opponent, alpha, beta))
+            
+            if value <= alpha:
+                return value  # α cutoff
+            
+            beta = min(beta, value)
+        
+        return value
+    
+    def terminal_value(self, state, player, opponent, p0_score, p1_score):
+        """
+        Evaluate terminal game state
+        """
+        if player == 1:
+            my_score = p0_score
+            opp_score = p1_score
+        else:
+            my_score = p1_score
+            opp_score = p0_score
+        
+        if my_score > opp_score:
+            return 1000 + (my_score - opp_score)  # Win
+        elif my_score < opp_score:
+            return -1000 + (my_score - opp_score)  # Loss
+        else:
+            return 0  # Tie
+    
+    def evaluation(self, state, player, opponent):
+        """
+        Evaluation function for non-terminal states
+        """
+        # Simple evaluation: piece difference
+        if player == 1:
+            my_pieces = np.sum(state == 1)
+            opp_pieces = np.sum(state == 2)
+        else:
+            my_pieces = np.sum(state == 2)
+            opp_pieces = np.sum(state == 1)
+        
+        score = (my_pieces - opp_pieces) * 10
+        
+        # Corner control bonus
+        corners = [(0,0), (0,6), (6,0), (6,6)]
+        for r, c in corners:
+            if state[r, c] == player:
+                score += 20
+            elif state[r, c] == opponent:
+                score -= 20
+        
+        return score
+    
+    def order_moves(self, state, moves, player):
+        """
+        Order moves for Max player (us) - best moves first for better pruning
+        """
+        from helpers import count_disc_count_change
+        
+        scored = []
+        for move in moves:
+            score = 0
+            
+            # Immediate gain
+            gain = count_disc_count_change(state, move, player)
+            score += gain * 5
+            
+            # Corner moves are best
             dest = move.get_dest()
             if dest in [(0,0), (0,6), (6,0), (6,6)]:
-                corners.append(move)
-            else:
-                # Quick score for non-corners
-                gain = count_disc_count_change(board, move, player)
-                non_corners.append((gain, move))
+                score += 15
+            
+            # Edge moves are good
+            if dest[0] == 0 or dest[0] == 6 or dest[1] == 0 or dest[1] == 6:
+                score += 5
+            
+            scored.append((score, move))
         
-        # Sort non-corners by gain
-        non_corners.sort(reverse=True, key=lambda x: x[0])
-        
-        # Combine: corners first, then high-gain non-corners
-        result = corners[:]
-        result.extend([move for _, move in non_corners])
-        
-        return result
+        # Sort descending (best moves first)
+        scored.sort(reverse=True, key=lambda x: x[0])
+        return [move for _, move in scored]
     
-    # OLD FUNCTIONS REMOVED:
-    # - evaluate() - too complex, slows down search
-    # - evaluate_simple() - inlined in fast_alpha_beta
-    # - strategic_move_order() - too slow for deep search
-    # - creates_dangerous_hole() - tactical heuristics removed for speed
-    # - corner_access_penalty() - removed for simplicity
-
-
-class TimeoutError(Exception):
-    """Custom exception for timeout"""
-    pass
+    def order_moves_opponent(self, state, moves, opponent, player):
+        """
+        Order moves for Min player (opponent) - worst moves for us first
+        """
+        from helpers import count_disc_count_change
+        
+        scored = []
+        for move in moves:
+            score = 0
+            
+            # Opponent's immediate gain (bad for us)
+            gain = count_disc_count_change(state, move, opponent)
+            score += gain * 5  # Higher = worse for us
+            
+            # Opponent getting corners is very bad for us
+            dest = move.get_dest()
+            if dest in [(0,0), (0,6), (6,0), (6,6)]:
+                score += 15
+            
+            scored.append((score, move))
+        
+        # Sort ascending (worst moves for us first)
+        scored.sort(key=lambda x: x[0])
+        return [move for _, move in scored]
